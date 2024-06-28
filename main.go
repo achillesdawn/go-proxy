@@ -55,20 +55,42 @@ func handleGetRequest(conn net.Conn, r *http.Request) {
 
 }
 
-//lint:ignore U1000 Ignore unused function temporarily for debugging
-func readData(buf bufio.Reader) {
+func readData(dst, src net.Conn, name string) {
+
+	defer src.Close()
+
+	buf := make([]byte, 32*1024)
 
 	for {
-		line, err := buf.ReadBytes('\n')
+		nRead, err := src.Read(buf)
+
+		if nRead > 0 {
+
+			fmt.Println("┋ [%]", name, string(buf[:nRead]))
+
+			nWrite, writeErr := dst.Write(buf[:nRead])
+
+			if nWrite != nRead {
+				color.Red("WRITE ERROR")
+				break
+			}
+
+			if writeErr != nil {
+				fmt.Println("WRITE ERROR")
+				err = writeErr
+			}
+
+		}
+
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				color.Red("Conn closed")
 				break
 			} else {
-				panic(err)
+				color.Red("%s", err.Error())
+				return
 			}
 		}
-		fmt.Println("┋", string(line))
 	}
 }
 
@@ -86,30 +108,8 @@ func handleConnect(conn net.Conn, r *http.Request) {
 	okResponse := "HTTP/1.1 200 OK\r\n\r\n"
 	conn.Write([]byte(okResponse))
 
-	defer upstream.Close()
-	defer conn.Close()
-
-	go io.Copy(conn, upstream)
-	io.Copy(upstream, conn)
-	// go func() {
-	// 	buf := bufio.NewReader(upstream)
-
-	// 	var buffer bytes.Buffer
-
-	// 	for {
-	// 		n, err := buf.Read(buffer.AvailableBuffer())
-	// 		if err != nil {
-	// 			color.Red("Error reading from %s : %s", addr, err.Error())
-	// 			return
-	// 		}
-
-	// 		color.Blue("[%s]: %s\n\n", addr, buffer.String())
-	// 		if n == 0 {
-	// 			break
-	// 		}
-	// 	}
-
-	// }()
+	go readData(conn, upstream, fmt.Sprintf("%s <-", r.Host))
+	readData(upstream, conn, fmt.Sprintf("<- %s ", r.Host))
 
 }
 
@@ -150,7 +150,6 @@ func handleConn(conn net.Conn) {
 		fmt.Printf("%s %s\n", color.GreenString("GET"), req.RequestURI)
 		handleGetRequest(conn, req)
 	}
-
 }
 
 func main() {
